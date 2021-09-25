@@ -7,6 +7,6 @@ deploy:
   stage: deploy
   script:
     - yarn install
-    - yarn set version classic
-    - ./node_modules/lerna/cli.js bootstrap --use-workspaces
+    - yarn build
+#    - ./node_modules/lerna/cli.js bootstrap --use-workspaces
     - ./node_modules/lerna/cli.js publish
