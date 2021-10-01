@@ -11,4 +11,4 @@ deploy:
     - yarn build
 #    - ./node_modules/lerna/cli.js bootstrap --use-workspaces
     - ./node_modules/lerna/cli.js version patch
-    - ./node_modules/lerna/cli.js publish from-package
+    - ./node_modules/lerna/cli.js publish from-git
