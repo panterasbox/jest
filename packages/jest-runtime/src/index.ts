@@ -57,6 +57,7 @@ import {
   findSiblingsWithFileExtension,
 } from './helpers';
 import type {Context} from './types';
+import { EventEmitter } from 'events';
 
 export type {Context} from './types';
 
@@ -115,6 +116,9 @@ const testTimeoutSymbol = Symbol.for('TEST_TIMEOUT_SYMBOL');
 const retryTimesSymbol = Symbol.for('RETRY_TIMES');
 
 const NODE_MODULES = path.sep + 'node_modules' + path.sep;
+
+const CACHE_EVENT = "ModuleCacheWrite";
+const LOAD_EVENT = "ModuleLoad";
 
 const getModuleNameMapper = (config: Config.ProjectConfig) => {
   if (
@@ -200,6 +204,7 @@ export default class Runtime {
   private readonly _moduleMocker: ModuleMocker;
   private _isolatedModuleRegistry: ModuleRegistry | null;
   private _moduleRegistry: ModuleRegistry;
+  private _eventEmitter: EventEmitter;
   private readonly _esmoduleRegistry: Map<Config.Path, VMModule>;
   private readonly _cjsNamedExports: Map<Config.Path, Set<string>>;
   private readonly _esmModuleLinkingMap: WeakMap<VMModule, Promise<unknown>>;
@@ -258,6 +263,7 @@ export default class Runtime {
     this._isolatedModuleRegistry = null;
     this._isolatedMockRegistry = null;
     this._moduleRegistry = new Map();
+    this._eventEmitter = new EventEmitter();
     this._esmoduleRegistry = new Map();
     this._cjsNamedExports = new Map();
     this._esmModuleLinkingMap = new WeakMap();
@@ -782,12 +788,13 @@ export default class Runtime {
     }
 
     let moduleRegistry;
-
+    let emitEvent = false;
     if (isInternal) {
       moduleRegistry = this._internalModuleRegistry;
     } else if (this._isolatedModuleRegistry) {
       moduleRegistry = this._isolatedModuleRegistry;
     } else {
+      emitEvent = true;
       moduleRegistry = this._moduleRegistry;
     }
 
@@ -807,8 +814,15 @@ export default class Runtime {
       loaded: false,
       path: path.dirname(modulePath),
     };
+    const previous = moduleRegistry.get(modulePath);
     moduleRegistry.set(modulePath, localModule);
-
+    if (emitEvent) {
+      this._eventEmitter.emit(CACHE_EVENT, {
+        modulePath,
+        module,
+        previous
+      });
+    }
     try {
       this._loadModule(
         localModule,
@@ -817,9 +831,18 @@ export default class Runtime {
         modulePath,
         options,
         moduleRegistry,
+        (emitEvent ? this._eventEmitter : undefined)
       );
     } catch (error: unknown) {
+      const previous = moduleRegistry.get(modulePath);
       moduleRegistry.delete(modulePath);
+      if (emitEvent) {
+        this._eventEmitter.emit(CACHE_EVENT, {
+          modulePath,
+          undefined,
+          previous
+        });
+      }
       throw error;
     }
 
@@ -861,11 +884,13 @@ export default class Runtime {
       {conditions: this.cjsConditions},
     );
 
-    const mockRegistry = this._isolatedMockRegistry || this._mockRegistry;
-
-    if (mockRegistry.get(moduleID)) {
-      return mockRegistry.get(moduleID);
+    if (this._isolatedMockRegistry?.has(moduleID)) {
+      return this._isolatedMockRegistry.get(moduleID);
+    } else if (this._mockRegistry.has(moduleID)) {
+      return this._mockRegistry.get(moduleID);
     }
+
+    const mockRegistry = this._isolatedMockRegistry || this._mockRegistry;
 
     if (this._mockFactories.has(moduleID)) {
       // has check above makes this ok
@@ -943,6 +968,7 @@ export default class Runtime {
     modulePath: Config.Path,
     options: InternalModuleOptions | undefined,
     moduleRegistry: ModuleRegistry,
+    eventEmitter: EventEmitter | undefined = undefined
   ) {
     if (path.extname(modulePath) === '.json') {
       const text = stripBOM(this.readFile(modulePath));
@@ -963,6 +989,11 @@ export default class Runtime {
       this._execModule(localModule, options, moduleRegistry, fromPath);
     }
     localModule.loaded = true;
+    if (eventEmitter) {
+      eventEmitter.emit(LOAD_EVENT, {
+        module: localModule
+      });
+    }
   }
 
   private _getFullTransformationOptions(
@@ -1758,6 +1789,8 @@ export default class Runtime {
         set: notPermittedMethod,
       });
     })();
+    //@ts-ignore
+    moduleRequire.eventEmitter = this._eventEmitter;
 
     Object.defineProperty(moduleRequire, 'main', {
       enumerable: true,
