@@ -17,4 +17,4 @@ deploy:
     - yarn build
 #    - ./node_modules/lerna/cli.js bootstrap --use-workspaces
     - ./node_modules/lerna/cli.js version --yes --conventional-commits --create-release gitlab
-#    - ./node_modules/lerna/cli.js publish from-git
+    - ./node_modules/lerna/cli.js publish from-release
